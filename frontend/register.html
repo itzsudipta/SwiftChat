@@ -191,10 +191,18 @@
     </div>
 
     <script>
-        // Backend API base URL - Update this to match your FastAPI server
-        const API_BASE_URL = window.location.hostname === 'localhost'
-            ? 'http://localhost:8000'
-            : 'https://swiftchat-dlt7.onrender.com'; // Replace with your Render backend URL
+            // Backend API base URL - Detect environment automatically
+            const API_BASE_URL = (() => {
+                const hostname = window.location.hostname;
+
+                // If running locally (localhost, 127.0.0.1, or codespace)
+                if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('github.dev')) {
+                    return 'http://localhost:8000';
+                }
+
+                // If deployed, use same origin (eliminates CORS issues)
+                return window.location.origin;
+            })();
 
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
