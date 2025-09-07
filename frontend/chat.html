@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - SwiftChat</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <div class="chat-header">
+            <h1>SwiftChat</h1>
+            <div class="user-info">
+                <span id="userEmail"></span>
+                <button id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+        </div>
+
+        <!-- Room Selection -->
+        <div class="room-section">
+            <div class="room-input-group">
+                <label for="roomId">Chat Room:</label>
+                <input type="text" id="roomId" placeholder="Enter room ID (e.g., general, support)">
+                <button id="joinRoomBtn" class="join-btn">Join Room</button>
+            </div>
+            <div id="currentRoom" class="current-room hidden">
+                Current Room: <span id="currentRoomName"></span>
+            </div>
+        </div>
+
+        <!-- Messages Area -->
+        <div class="messages-container">
+            <div id="messagesArea" class="messages-area">
+                <!-- Messages will be displayed here -->
+                <div class="no-room-message">
+                    <p>👆 Enter a room ID above to start chatting</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Input -->
+        <div class="message-input-section">
+            <div class="message-input-group">
+                <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+                <button id="sendBtn" class="send-btn" disabled>Send</button>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="loading hidden">Loading...</div>
+
+        <!-- Error messages -->
+        <div id="errorMessage" class="error-message hidden"></div>
+    </div>
+
+    <script>
+        // Backend API base URL - Detect environment automatically
+        const API_BASE_URL = (() => {
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+
+            // If running locally (localhost, 127.0.0.1, or codespace)
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('github.dev')) {
+                return 'http://localhost:8000';
+            }
+
+            // If deployed on Render or similar
+            return 'https://your-backend-url.onrender.com'; // Replace with actual backend URL
+        })();
+
+        console.log('🔗 Chat API Base URL:', API_BASE_URL); // Debug log
+
+        // Global variables
+        let currentRoomId = null;
+        let currentUserId = null;
+        let authToken = null;
+
+        // DOM elements
+        const roomIdInput = document.getElementById('roomId');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const messagesArea = document.getElementById('messagesArea');
+        const currentRoomDiv = document.getElementById('currentRoom');
+        const currentRoomName = document.getElementById('currentRoomName');
+        const userEmailSpan = document.getElementById('userEmail');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const loadingDiv = document.getElementById('loading');
+        const errorMessageDiv = document.getElementById('errorMessage');
+
+        // Check authentication on page load
+        window.addEventListener('load', () => {
+            authToken = localStorage.getItem('authToken');
+            const userEmail = localStorage.getItem('userEmail');
+            const userId = localStorage.getItem('userId');
+
+            console.log('Loaded from localStorage:', { authToken, userEmail, userId }); // Debug log
+
+            if (!authToken) {
+                // Redirect to login if no token
+                window.location.href = 'login.html';
+                return;
+            }
+
+            userEmailSpan.textContent = userEmail || 'User';
+
+            // Set user ID (get it from localStorage)
+            if (userId && userId !== 'null' && userId !== 'undefined') {
+                currentUserId = parseInt(userId);
+            } else {
+                // If userId is not available, redirect to login to get fresh data
+                console.warn('No userId found in localStorage, redirecting to login');
+                localStorage.clear();
+                window.location.href = 'login.html';
+                return;
+            }
+            console.log('Set currentUserId to:', currentUserId); // Debug log
+        });
+
+        // Join room functionality
+        joinRoomBtn.addEventListener('click', async () => {
+            const roomId = roomIdInput.value.trim();
+            if (!roomId) {
+                showError('Please enter a room ID');
+                return;
+            }
+
+            await joinRoom(roomId);
+        });
+
+        // Send message functionality
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Logout functionality
+        logoutBtn.addEventListener('click', () => {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userEmail');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('username');
+            window.location.href = 'login.html';
+        });
+
+        async function joinRoom(roomId) {
+            try {
+                console.log('🚀 Attempting to join room:', roomId); // Debug log
+                console.log('🔗 Using API URL:', API_BASE_URL); // Debug log
+                console.log('🔑 Auth token exists:', !!authToken); // Debug log
+
+                showLoading(true);
+                currentRoomId = roomId;
+
+                // Load messages from the room using GET /chat/messages/{room_id}
+                const response = await fetch(`${API_BASE_URL}/chat/messages/${roomId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                console.log('📡 Room join response status:', response.status); // Debug log
+
+                if (response.ok) {
+                    const messages = await response.json();
+                    console.log('📝 Received messages:', messages); // Debug log
+                    displayMessages(messages);
+
+                    // Update UI
+                    currentRoomName.textContent = roomId;
+                    currentRoomDiv.classList.remove('hidden');
+                    messageInput.disabled = false;
+                    sendBtn.disabled = false;
+                    messageInput.placeholder = `Type a message in ${roomId}...`;
+
+                    hideError();
+                } else {
+                    const error = await response.json();
+                    console.error('❌ Room join failed:', error); // Debug log
+                    showError(error.detail || 'Failed to load room messages');
+                }
+            } catch (error) {
+                console.error('❌ Error joining room:', error);
+                showError('Network error. Please try again.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function sendMessage() {
+            const content = messageInput.value.trim();
+            if (!content || !currentRoomId) return;
+
+            try {
+                // Send message using POST /chat/messages/
+                const messageData = {
+                    room_id: parseInt(currentRoomId), // Ensure it's an integer
+                    sender_id: currentUserId,
+                    content: content
+                };
+
+                console.log('Sending message data:', messageData); // Debug log
+
+                const response = await fetch(`${API_BASE_URL}/chat/messages/`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(messageData)
+                });
+
+                if (response.ok) {
+                    // Clear input
+                    messageInput.value = '';
+
+                    // Reload messages to show the new message
+                    await joinRoom(currentRoomId);
+                } else {
+                    const error = await response.json();
+                    console.error('Send message error:', error); // Debug log
+                    console.error('Full error details:', JSON.stringify(error, null, 2)); // More detailed log
+                    showError(error.detail || 'Failed to send message');
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                showError('Network error. Please try again.');
+            }
+        }
+
+        function displayMessages(messages) {
+            messagesArea.innerHTML = '';
+
+            if (!messages || messages.length === 0) {
+                messagesArea.innerHTML = '<div class="no-messages">No messages in this room yet. Start the conversation!</div>';
+                return;
+            }
+
+            messages.forEach(message => {
+                const messageEl = createMessageElement(message);
+                messagesArea.appendChild(messageEl);
+            });
+
+            // Scroll to bottom
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        function createMessageElement(message) {
+            const messageDiv = document.createElement('div');
+            const isOwnMessage = message.sender_id === currentUserId;
+
+            messageDiv.className = `message ${isOwnMessage ? 'own-message' : 'other-message'}`;
+
+            // Display username if it's own message, otherwise show the sender_id
+            const senderName = isOwnMessage ? (localStorage.getItem('username') || 'You') : `User ${message.sender_id}`;
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span class="sender">${senderName}</span>
+                    <span class="timestamp">${formatTimestamp(message.created_at || new Date())}</span>
+                </div>
+                <div class="message-content">${escapeHtml(message.content)}</div>
+            `;
+
+            return messageDiv;
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showLoading(show) {
+            if (show) {
+                loadingDiv.classList.remove('hidden');
+            } else {
+                loadingDiv.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            errorMessageDiv.textContent = message;
+            errorMessageDiv.classList.remove('hidden');
+            setTimeout(() => {
+                hideError();
+            }, 5000);
+        }
+
+        function hideError() {
+            errorMessageDiv.classList.add('hidden');
+        }
+    </script>
+</body>
+
+</html>
